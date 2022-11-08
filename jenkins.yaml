@@ -1,0 +1,130 @@
+podTemplate(yaml: '''
+    apiVersion: v1
+    kind: Pod
+    spec:
+      containers:
+      - name: maven
+        image: maven:latest
+        command:
+        - sleep
+        args:
+        - 999999
+      - name: kubectl
+        image: bitnami/kubectl
+        command:
+        - sleep
+        args:
+        - 9999999
+      - name: kaniko
+        image: gcr.io/kaniko-project/executor:debug
+        command:
+        - sleep
+        args:
+        - 9999999
+        volumeMounts:
+        - name: kaniko-secret
+          mountPath: /kaniko/.docker
+      restartPolicy: Never
+      volumes:
+      - name: kaniko-secret
+        secret:
+            secretName: dockercred
+            items:
+            - key: .dockerconfigjson
+              path: config.json
+''') {
+
+  node(POD_LABEL) {
+    stage('Get a maven project') {
+      git url: 'https://github.com/PottaAkhil/ecomm.git', branch: 'master'
+      container('maven') {
+        stage('Build a maven project') {
+          sh '''
+            echo pwd
+          '''
+        }
+      }
+    }
+    stage('SonarQube analysis') {
+    def scannerHome = tool 'sonarqube';
+    withSonarQubeEnv('sonarqube') {
+      sh "${scannerHome}/bin/sonar-scanner \
+      -D sonar.login=admin \
+      -D sonar.password=admin \
+      -D sonar.projectKey=64ff26562ec686e6a6d6dd1a13ecb1e056ae4f00 \
+      -D sonar.exclusions=vendor/**,resources/**,**/*.java \
+      -D sonar.host.url=http://52.221.196.44:9000/"
+    }
+  }
+
+
+    stage('Build nodejs Image') {
+      container('kaniko') {
+        stage('Build a Go project') {
+          sh '''
+            /kaniko/executor --context `pwd` --destination public.ecr.aws/x2e7b0r9/nodeapplication/hello-kaniko:1.1      
+          '''
+        }
+      }
+    }
+
+    stage('pushing Artifacts') {
+    tools {
+        maven "MAVEN"
+    }
+    environment {
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "http"
+        NEXUS_URL = "52.221.196.44:8081"
+        NEXUS_REPOSITORY = "Artifacts"
+        NEXUS_CREDENTIAL_ID = "Nexus_cred"
+    }
+    stages {
+        
+        stage("Maven Build") {
+            steps {
+                script {
+                    sh "mvn -Dmaven.test.failure.ignore=true clean package"
+                }
+            }
+        }
+        stage("Publish to Nexus Repository Manager") {
+            steps {
+                script {
+                    pom = readMavenPom file: "pom.xml";
+                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
+                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
+                    artifactPath = filesByGlob[0].path;
+                    artifactExists = fileExists artifactPath;
+                    if(artifactExists) {
+                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
+                        nexusArtifactUploader(
+                            nexusVersion: NEXUS_VERSION,
+                            protocol: NEXUS_PROTOCOL,
+                            nexusUrl: NEXUS_URL,
+                            groupId: pom.groupId,
+                            version: pom.version,
+                            repository: NEXUS_REPOSITORY,
+                            credentialsId: NEXUS_CREDENTIAL_ID,
+                            artifacts: [
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: artifactPath,
+                                type: pom.packaging],
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: "pom.xml",
+                                type: "pom"]
+                            ]
+                        );
+                    } else {
+                        error "*** File: ${artifactPath}, could not be found";
+                    }
+                }
+            }
+        }
+    } 
+    }
+    
+}
+}
