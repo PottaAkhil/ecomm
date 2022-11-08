@@ -37,15 +37,7 @@ podTemplate(yaml: '''
   node(POD_LABEL) {
     stage('Get a maven project') {
       git url: 'https://github.com/ravi2krishna/JavaCalculator.git', branch: 'master'
-      container('maven') {
-        stage('Build a maven project') {
-          sh '''
-            echo pwd
-          '''
-        }
-      }
-    }
-    stage('SonarQube analysis') {
+      stage('SonarQube analysis') {
     def scannerHome = tool 'sonarqube';
     withSonarQubeEnv('sonarqube') {
       sh "${scannerHome}/bin/sonar-scanner \
@@ -56,8 +48,15 @@ podTemplate(yaml: '''
       -D sonar.host.url=http://52.221.196.44:9000/"
     }
   }
-
-
+      container('maven') {
+        stage('Build a maven project') {
+          sh '''
+            echo pwd
+          '''
+        }
+      }
+    }
+    
     stage('Build nodejs Image') {
       container('kaniko') {
         stage('Build a Go project') {
