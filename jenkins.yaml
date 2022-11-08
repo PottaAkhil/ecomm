@@ -36,7 +36,7 @@ podTemplate(yaml: '''
 
   node(POD_LABEL) {
     stage('Get a maven project') {
-      git url: 'https://github.com/PottaAkhil/ecomm.git', branch: 'master'
+      git url: 'https://github.com/ravi2krishna/JavaCalculator.git', branch: 'master'
       container('maven') {
         stage('Build a maven project') {
           sh '''
